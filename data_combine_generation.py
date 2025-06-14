@@ -2,6 +2,7 @@ import os
 import xml.etree.ElementTree as ET
 import pandas as pd
 import matplotlib.pyplot as plt
+from pathlib import Path
 
 def parse_xml_file(filepath):
     import xml.etree.ElementTree as ET
@@ -105,6 +106,42 @@ def combine_files_by_country_and_type(filepaths_by_country_and_type):
 
     return combined_data_by_country_and_type
 
+
+def combine_files_from_FR_and_type(data_folder, PSRTYPE_MAPPING):
+    """
+    Liest alle französischen CSV-Generationsdateien ein, kombiniert sie zu einem DataFrame
+    und plottet die Zeitreihen nach Technologie inkl. Gesamtsumme.
+    """
+    all_files = list(Path(data_folder).glob("data_FR_generation_B*.csv"))
+
+    combined_df = pd.DataFrame()
+    for file in all_files:
+        psr_code = file.stem.split("_")[-1]
+        column_name = PSRTYPE_MAPPING.get(psr_code, psr_code)
+        df = pd.read_csv(file)
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
+        df = df.set_index("timestamp")
+        if "psrType" in df.columns:
+            df = df.drop(columns=["psrType"])
+        df = df.rename(columns={"value": column_name})
+        df = df[~df.index.duplicated(keep='first')]
+        if combined_df.empty:
+            combined_df = df
+        else:
+            combined_df = combined_df.join(df, how="outer")
+
+    combined_df = combined_df.sort_index()
+    combined_df["generation_Total [MWh]"] = combined_df.sum(axis=1)
+
+    # Speichere die kombinierte Zeitreihe als CSV
+    output_csv_path = os.path.join(data_folder, "data_combined_FR_generation.csv")
+    combined_df.reset_index().to_csv(output_csv_path, index=False)
+    print(f" --> Gespeichert: {output_csv_path}")
+
+    print(combined_df.head())
+
+    return combined_df
+
 def combine_all_countries_to_single_file(combined_data_by_country_and_type, output_path):
     import pandas as pd
 
@@ -172,16 +209,6 @@ if __name__ == "__main__":
                 "./data/generation_AT_2025.xml"
             ],
         },
-        "FR": {
-            "generation": [
-                "./data/generation_FR_2020.xml",
-                "./data/generation_FR_2021.xml",
-                "./data/generation_FR_2022.xml",
-                "./data/generation_FR_2023.xml",
-                "./data/generation_FR_2024.xml",
-                "./data/generation_FR_2025.xml"
-            ],
-        },
         "DE_LU": {
             "generation": [
                 "./data/generation_DE_LU_2020.xml",
@@ -236,6 +263,19 @@ if __name__ == "__main__":
 
     # Combine files by country and type
     combined_data_by_country_and_type = combine_files_by_country_and_type(filepaths_by_country_and_type)
+ 
+    df_fr = combine_files_from_FR_and_type(data_folder="./data", PSRTYPE_MAPPING=PSRTYPE_MAPPING)
+    print(f"Geladene Daten für Frankreich: {len(df_fr)} Einträge")
+    print(df_fr.head())
+
+    # Nach dem Laden von df_fr:
+    if not df_fr.empty:
+        # Index zurück in Spalte für Kompatibilität
+        df_fr_reset = df_fr.reset_index()
+        # Optional: Spaltennamen anpassen, damit sie wie bei den anderen Ländern sind
+        df_fr_reset = df_fr_reset.rename(columns={"generation_MW": "generation_Total [MW]"})
+        # In das Dictionary einfügen
+        combined_data_by_country_and_type["FR"] = {"generation": df_fr_reset}
 
     # Speichere alle Länder in einer einzigen Datei
     output_csv_path = "./data/combined_generation_all_countries.csv"
