@@ -665,12 +665,12 @@ cutoff = pd.Timestamp("2025-04-09 00:00:00", tz=processed_df.index.tz)
 processed_df = processed_df[processed_df.index < cutoff]
 
 # Speichere den unbearbeiteten kombinierten DataFrame
-unprocessed_csv_path = "/data/unprocessed_combined_df.csv"
+unprocessed_csv_path = "./data/unprocessed_combined_df.csv"
 combined_df.to_csv(unprocessed_csv_path)
 print(f"Unbearbeiteter DataFrame wurde gespeichert unter: {unprocessed_csv_path}")
 
 # Speichere den bearbeiteten kombinierten DataFrame
-processed_csv_path = "/data/processed_combined_df.csv"
+processed_csv_path = "./data/processed_combined_df.csv"
 processed_df.to_csv(processed_csv_path)
 print(f"Bearbeiteter DataFrame wurde gespeichert unter: {processed_csv_path}")
 
