@@ -2,22 +2,26 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import missingno as msno
+import os
 
 # Paths to the uploaded files
+
+folder_path = "/Users/andrinsiegenthaler/Desktop/Thesis/Code/master-thesis/trading-algorithm"
+
 file_paths = [
-    "/Users/andrinsiegenthaler/Documents/MAS/Thesis/Code/master-thesis/data/combined_crossborder_final.csv",
-    "/Users/andrinsiegenthaler/Documents/MAS/Thesis/Code/master-thesis/data/combined_aggregate_water_reservoirs_and_hydro_storage_all_countries_2020_2025.csv",
-    "/Users/andrinsiegenthaler/Documents/MAS/Thesis/Code/master-thesis/data/combined_forecast_all_countries.csv",
-    "/Users/andrinsiegenthaler/Documents/MAS/Thesis/Code/master-thesis/data/combined_load_all_countries.csv",
-    "/Users/andrinsiegenthaler/Documents/MAS/Thesis/Code/master-thesis/data/combined_generation_all_countries.csv"
+    "/data/combined_crossborder_final.csv",
+    "/data/combined_aggregate_water_reservoirs_and_hydro_storage_all_countries_2020_2025.csv",
+    "/data/combined_forecast_all_countries.csv",
+    "/data/combined_load_all_countries.csv",
+    "/data/combined_generation_all_countries.csv"
 
 ]
 
 # Add the additional file for price data
-price_file_path = "/Users/andrinsiegenthaler/Documents/MAS/Thesis/Code/master-thesis/data_price/combined_day_ahead_prices_all_countries_2020_2025.csv"
+price_file_path = os.path.join(folder_path, "data_price/combined_day_ahead_prices_all_countries_2020_2025.csv")
 
 # Load each CSV file into a DataFrame
-dfs = [pd.read_csv(file_path) for file_path in file_paths]
+dfs = [pd.read_csv(os.path.join(folder_path, file_path.lstrip("/"))) for file_path in file_paths]
 
 # Load the price data into a separate DataFrame
 price_df = pd.read_csv(price_file_path)
@@ -480,51 +484,124 @@ duplicate_rows = df[df.duplicated(keep=False)]
 duplicate_timestamps = duplicate_rows.index
 print(f"Zeitstempel der doppelten Zeilen: {duplicate_timestamps}")
 
-
 #======================================================================================================================
 
-print("\nVorschau des bearbeiteten DataFrames CH_generation_Total [MWh]:")
-print(processed_df["CH_generation_Total [MWh]"].head())
+# Liste der Jahresdateien (passe ggf. die Jahre und Pfade an)
+years = range(2020, 2026)
+dfs_swissgrid = []
 
-csv_path_Swissgrid = "/Users/andrinsiegenthaler/Documents/MAS/Thesis/Code/master-thesis/data/EnergieUebersichtCH-2025_SG.csv"
-# === Direkt beim Einlesen UTC setzen ===
-df_Swissgrid = pd.read_csv(csv_path_Swissgrid, sep=";", parse_dates=[0], dayfirst=True, header=0)
-df_Swissgrid.columns = ["Zeitstempel", "Produzierte_Energie_CH_kWh"]
-df_Swissgrid["Zeitstempel"] = pd.to_datetime(df_Swissgrid["Zeitstempel"], dayfirst=True, utc=True)
-df_Swissgrid.set_index("Zeitstempel", inplace=True)
+for year in years:
+    csv_path = os.path.join(folder_path, "data", f"EnergieUebersichtCH-{year}_SG.csv")
+    try:
+        df = pd.read_csv(csv_path, sep=";", parse_dates=[0], dayfirst=True, usecols=[0, 1], header=0)
+        df.columns = ["Zeitstempel", "Summe produzierte Energie Regelblock Schweiz in kWh"]
+        df["Zeitstempel"] = pd.to_datetime(df["Zeitstempel"], dayfirst=True, utc=True)
+        df.set_index("Zeitstempel", inplace=True)
+        # Umrechnen von kWh → MWh und Faktor anwenden
+        df["CH_generation_Total [MWh]"] = df["Summe produzierte Energie Regelblock Schweiz in kWh"] / 1000
+        df["CH_generation_Total [MWh]"] = df["CH_generation_Total [MWh]"].round(1)
+        dfs_swissgrid.append(df[["CH_generation_Total [MWh]"]])
+        print(f"{year}: {df.shape[0]} Zeilen eingelesen.")
+    except FileNotFoundError:
+        print(f"Datei für {year} nicht gefunden, überspringe.")
+
+# Alle Jahre zu einer fortlaufenden Zeitreihe verbinden
+if dfs_swissgrid:
+    swissgrid_full = pd.concat(dfs_swissgrid).sort_index()
+    print("\nVorschau der fortlaufenden Zeitreihe CH_generation_Total [MWh]:")
+    print(swissgrid_full.head())
+    print(swissgrid_full.tail())
+else:
+    print("Keine Swissgrid-Dateien gefunden.")
+
+print("processed_df generation CH in MWh:", processed_df["CH_generation_Total [MWh]"].head())
+print("swissgrid_full generation CH in MWh:", swissgrid_full.head())
+print("Größe von processed_df:", processed_df["CH_generation_Total [MWh]"].shape)
+print("Größe von swissgrid_full:", swissgrid_full["CH_generation_Total [MWh]"].shape)
+print("Letzte Zeitstempel processed_df:", processed_df["CH_generation_Total [MWh]"].tail(5))
+print("Letzte Zeitstempel swissgrid_full:", swissgrid_full["CH_generation_Total [MWh]"].tail(5))
+
+# Entferne alle Zeilen nach dem 01.01.2025
+cutoff = pd.Timestamp("2025-01-01 00:00:00+00:00   ", tz=processed_df.index.tz)
+processed_df_cut = processed_df[processed_df.index < cutoff]
+swissgrid_full_cut = swissgrid_full[swissgrid_full.index < cutoff]
+
+print("Größe von processed_df:", processed_df_cut["CH_generation_Total [MWh]"].shape)
+print("Größe von swissgrid_full:", swissgrid_full_cut["CH_generation_Total [MWh]"].shape)
+print("Letzte Zeitstempel processed_df:", processed_df_cut["CH_generation_Total [MWh]"].tail(5))
+print("Letzte Zeitstempel swissgrid_full:", swissgrid_full_cut["CH_generation_Total [MWh]"].tail(5))
+
+# Setze Zeitzone der Swissgrid-Daten explizit auf UTC
+if swissgrid_full_cut.index.tz is None:
+    swissgrid_full_cut.index = swissgrid_full_cut.index.tz_localize("UTC")
+else:
+    swissgrid_full_cut.index = swissgrid_full_cut.index.tz_convert("UTC")
+
+# Korrelation zwischen processed_df und swissgrid_full für CH_generation_Total [MWh]
+if "CH_generation_Total [MWh]" in processed_df_cut.columns and "CH_generation_Total [MWh]" in swissgrid_full_cut.columns:
+    # Gemeinsame Zeitstempel finden
+    common_idx = processed_df_cut.index.intersection(swissgrid_full_cut.index)
+    # Werte extrahieren und auf gemeinsame Zeitstempel beschränken
+    series1 = processed_df_cut.loc[common_idx, "CH_generation_Total [MWh]"]
+    series2 = swissgrid_full_cut.loc[common_idx, "CH_generation_Total [MWh]"]
+    # Zu DataFrame zusammenfassen und nur Zeilen ohne NaN vergleichen
+    df_corr = pd.DataFrame({
+        "processed": series1,
+        "swissgrid": series2
+    }).dropna()
+    corr = df_corr["processed"].corr(df_corr["swissgrid"])
+    print(f"\nKorrelation zwischen processed_df und swissgrid_full_cut für 'CH_generation_Total [MWh]': {corr:.4f}")
+else:
+    print("Spalte 'CH_generation_Total [MWh]' fehlt in einem der DataFrames.")
 
 
-# === 4. Umrechnen von kWh → MWh ===
-df_Swissgrid["CH_generation_Total [MWh]"] = df_Swissgrid["Produzierte_Energie_CH_kWh"] / 1000 * 3.2827217482194953 
-# Auf eine Dezimalstelle runden
-df_Swissgrid["CH_generation_Total [MWh]"] = df_Swissgrid["CH_generation_Total [MWh]"].round(1)
-print(df_Swissgrid.head())
-
-# === 5. Neue Werte in df einfügen ===
-processed_df.update(df_Swissgrid[["CH_generation_Total [MWh]"]])
-
-print("\nVorschau des bearbeiteten DataFrames nach dem Einfügen der neuen Werte 2020-2024:")
-print(processed_df.loc["2020":"2024", "CH_generation_Total [MWh]"].dropna().head())
-
-# === 6. Vorschau und Speichern ===
-print("\nVorschau des bearbeiteten DataFrames nach dem Einfügen der neuen Werte 2025:")
-print(processed_df.loc["2025", "CH_generation_Total [MWh]"].head())
-
-print(processed_df["CH_generation_Total [MWh]"].dropna().index.min())
-print(processed_df["CH_generation_Total [MWh]"].dropna().index.max())
-
-# Speichere den kombinierten DataFrame vor der Bearbeitung
-processed_df = processed_df[processed_df.index <= "2025-04-30 23:45:00"]
-
-plt.figure(figsize=(15, 5))
-plt.plot(processed_df.index, processed_df["CH_generation_Total [MWh]"])
-plt.title("CH_generation_Total [MWh] – gesamte Zeitreihe")
-plt.xlabel("Zeit")
-plt.ylabel("MWh")
+plt.figure(figsize=(8, 6))
+plt.scatter(df_corr["processed"], df_corr["swissgrid"], alpha=0.3)
+plt.xlabel("processed_df CH_generation_Total [MWh]")
+plt.ylabel("swissgrid_full CH_generation_Total [MWh]")
+plt.title(f"Scatterplot (Korrelation: {corr:.2f})")
 plt.grid(True)
 plt.tight_layout()
 plt.show()
 
+window = 96*7  # z.B. eine Woche bei 15min-Daten
+rolling_corr = df_corr["processed"].rolling(window).corr(df_corr["swissgrid"])
+
+plt.figure(figsize=(14, 4))
+plt.plot(df_corr.index, rolling_corr)
+plt.title("Rollende Korrelation (Fenster: 1 Woche)")
+plt.xlabel("Zeit")
+plt.ylabel("Korrelation")
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+# Zeitreihen normalisieren (z-Standardisierung)
+df_corr["processed_norm"] = (df_corr["processed"] - df_corr["processed"].mean()) / df_corr["processed"].std()
+df_corr["swissgrid_norm"] = (df_corr["swissgrid"] - df_corr["swissgrid"].mean()) / df_corr["swissgrid"].std()
+
+plt.figure(figsize=(14, 5))
+plt.plot(df_corr.index, df_corr["processed_norm"], label="processed_df (normalisiert)")
+plt.plot(df_corr.index, df_corr["swissgrid_norm"], label="swissgrid_full (normalisiert)", alpha=0.7)
+plt.title("Normalisierte Zeitreihen: CH_generation_Total [MWh]")
+plt.xlabel("Zeit")
+plt.ylabel("z-standardisierter Wert")
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+processed_df = processed_df.drop(columns=["CH_generation_Total [MWh]"])
+print("Spalte 'CH_generation_Total [MWh]' wurde entfernt.")
+
+# Stelle sicher, dass beide DataFrames eindeutige Indizes haben
+processed_df = processed_df[~processed_df.index.duplicated(keep='first')]
+swissgrid_full = swissgrid_full[~swissgrid_full.index.duplicated(keep='first')]
+
+# Füge die Zeitreihe als neue Spalte hinzu (Index-Abgleich erfolgt automatisch)
+processed_df["CH_generation_Total [MWh]"] = swissgrid_full["CH_generation_Total [MWh]"]
+
+print("Spalte 'CH_generation_Total [MWh]' aus swissgrid_full wurde als neue Spalte in processed_df eingefügt.")
 
 print("\n=== Ausreißer-Analyse für alle numerischen Zeitreihen (IQR-Methode) ===")
 for col in processed_df.select_dtypes(include=[np.number]).columns:
@@ -557,7 +634,7 @@ for col in processed_df.select_dtypes(include=[np.number]).columns:
         plt.tight_layout()
         plt.show()
 
-# --- Manuelle Ausreißerbehandlung für definierte Schwellwerte ---
+# --- Manuelle Ausreisserbehandlung für definierte Schwellwerte ---
 
 def replace_outlier_with_neighbors_mean(series, threshold):
     s = series.copy()
@@ -573,22 +650,27 @@ def replace_outlier_with_neighbors_mean(series, threshold):
                 s.iloc[pos] = (prev_val + next_val) / 2
     return s
 
-# AT_wind_and_solar_forecast [MWh] > 5000
+# AT_wind_and_solar_forecast [MWh] > 6000
 col_at = "AT_wind_and_solar_forecast [MWh]"
 if col_at in processed_df.columns:
-    processed_df[col_at] = replace_outlier_with_neighbors_mean(processed_df[col_at], 5000)
+    processed_df[col_at] = replace_outlier_with_neighbors_mean(processed_df[col_at], 6000)
 
 # CH_load [MWh] > 15000
 col_ch = "CH_load [MWh]"
 if col_ch in processed_df.columns:
     processed_df[col_ch] = replace_outlier_with_neighbors_mean(processed_df[col_ch], 15000)
 
+# Entferne alle Zeilen nach dem 09.04.2025 (einschließlich)
+cutoff = pd.Timestamp("2025-04-09 00:00:00", tz=processed_df.index.tz)
+processed_df = processed_df[processed_df.index < cutoff]
+
 # Speichere den unbearbeiteten kombinierten DataFrame
-unprocessed_csv_path = "/Users/andrinsiegenthaler/Documents/MAS/Thesis/Code/master-thesis/data/unprocessed_combined_df.csv"
+unprocessed_csv_path = "./data/unprocessed_combined_df.csv"
 combined_df.to_csv(unprocessed_csv_path)
 print(f"Unbearbeiteter DataFrame wurde gespeichert unter: {unprocessed_csv_path}")
 
 # Speichere den bearbeiteten kombinierten DataFrame
-processed_csv_path = "/Users/andrinsiegenthaler/Documents/MAS/Thesis/Code/master-thesis/data/processed_combined_df.csv"
+processed_csv_path = "./data/processed_combined_df.csv"
 processed_df.to_csv(processed_csv_path)
 print(f"Bearbeiteter DataFrame wurde gespeichert unter: {processed_csv_path}")
+

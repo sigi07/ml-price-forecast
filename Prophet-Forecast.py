@@ -178,22 +178,22 @@ model = Prophet(
 #)
 
 # ============================================================================
-# Sliding Window Forecasting mit Prophet (historical_forecasts)
+# Modell fitten (einmalig)
 # ============================================================================
-forecast_horizon = 152  # 152 x 15min ≈ 1.6 Tage
-stride = 152            # Schrittweite im Sliding Window
-start = val_start # Sliding Window beginnt hier
-
-forecast_val = model.historical_forecasts(
+model.fit(
     series=train,
-    future_covariates=future_covariates,
-    #past_covariates=past_val,
-    start=start,
-    forecast_horizon=forecast_horizon,
-    stride=stride,
-    retrain=True,
-    verbose=True
+    future_covariates=future_train,
+    #past_covariates=past_train  # optional, Prophet nutzt sie nicht
 )
+
+# ============================================================================
+# Einmalige Vorhersage für den gesamten Val-Bereich
+# ============================================================================
+forecast = model.predict(
+    n=len(test),  # oder len(val), wenn du gegen val_start-end evaluieren willst
+    future_covariates=future_test,
+)
+
 
 # ============================================================================
 # Evaluation & Visualisierung
